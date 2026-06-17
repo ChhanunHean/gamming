@@ -1,0 +1,12 @@
+{
+  "name": "gaming-center",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix public-site\" \"npm run dev --prefix staff-portal\"",
+    "install:all": "npm install && npm install --prefix backend && npm install --prefix public-site && npm install --prefix staff-portal",
+    "seed": "npm run seed --prefix backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
