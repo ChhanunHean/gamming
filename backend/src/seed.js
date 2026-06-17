@@ -1,5 +1,4 @@
-import './db.js';
-import db from './db.js';
+import { initDb, query, queryOne } from './db.js';
 import { hashPassword, generateTotpSecret } from './utils/auth.js';
 
 const staffAccounts = [
@@ -10,35 +9,29 @@ const staffAccounts = [
   { name: 'Casey Staff', role: 'staff', username: 'staff4', password: 'Staff@123' },
 ];
 
-const stationCount = db.prepare('SELECT COUNT(*) as count FROM stations').get().count;
+await initDb();
+
+const stationCount = (await queryOne('SELECT COUNT(*)::int AS count FROM stations')).count;
 
 if (stationCount === 0) {
-  const insertStation = db.prepare('INSERT INTO stations (name) VALUES (?)');
   for (let i = 1; i <= 12; i += 1) {
-    insertStation.run(`Station ${String(i).padStart(2, '0')}`);
+    await query('INSERT INTO stations (name) VALUES ($1)', [`Station ${String(i).padStart(2, '0')}`]);
   }
   console.log('Created 12 gaming stations');
 }
 
-const existingStaff = db.prepare('SELECT COUNT(*) as count FROM staff').get().count;
+const existingStaff = (await queryOne('SELECT COUNT(*)::int AS count FROM staff')).count;
 
 if (existingStaff === 0) {
-  const insertStaff = db.prepare(`
-    INSERT INTO staff (name, role, username, password_hash, totp_secret)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-
   console.log('\n=== STAFF ACCOUNTS CREATED ===\n');
   console.log('Use Google Authenticator or any TOTP app with these secrets:\n');
 
   for (const account of staffAccounts) {
     const totp = generateTotpSecret(account.username);
-    insertStaff.run(
-      account.name,
-      account.role,
-      account.username,
-      hashPassword(account.password),
-      totp.base32
+    await query(
+      `INSERT INTO staff (name, role, username, password_hash, totp_secret)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [account.name, account.role, account.username, hashPassword(account.password), totp.base32]
     );
 
     console.log(`${account.name} (${account.role})`);
@@ -54,3 +47,4 @@ if (existingStaff === 0) {
 }
 
 console.log('Seed complete.');
+process.exit(0);

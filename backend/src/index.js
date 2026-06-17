@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import './db.js';
+import { initDb } from './db.js';
 import authRoutes from './routes/auth.js';
 import sessionRoutes from './routes/sessions.js';
 import stationRoutes from './routes/stations.js';
@@ -20,7 +20,7 @@ app.use(cors());
 app.use(express.json());
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'gaming-center-api' });
+  res.json({ status: 'ok', service: 'gaming-center-api', database: 'postgresql' });
 });
 
 app.use('/api/auth', authRoutes);
@@ -39,6 +39,9 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+await initDb();
+
 app.listen(PORT, () => {
   console.log(`Gaming Center API running at http://localhost:${PORT}`);
+  console.log(`PostgreSQL: ${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || 5432}/${process.env.DB_NAME || 'gaming_center'}`);
 });

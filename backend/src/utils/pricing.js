@@ -1,25 +1,26 @@
-import db from '../db.js';
+import { queryOne } from '../db.js';
 
-export function getHourlyRate() {
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'hourly_rate'").get();
+export async function getHourlyRate() {
+  const row = await queryOne("SELECT value FROM settings WHERE key = 'hourly_rate'");
   return parseFloat(row?.value || '5');
 }
 
-export function calculateSessionAmount(durationMinutes) {
-  const hourlyRate = getHourlyRate();
+export async function calculateSessionAmount(durationMinutes) {
+  const hourlyRate = await getHourlyRate();
   const hours = durationMinutes / 60;
   return Math.round(hours * hourlyRate * 100) / 100;
 }
 
-export function generateReceiptNumber() {
+export async function generateReceiptNumber() {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const count = db
-    .prepare("SELECT COUNT(*) as count FROM payments WHERE receipt_number LIKE ?")
-    .get(`RCP-${date}-%`).count;
-  return `RCP-${date}-${String(count + 1).padStart(4, '0')}`;
+  const row = await queryOne(
+    'SELECT COUNT(*)::int AS count FROM payments WHERE receipt_number LIKE $1',
+    [`RCP-${date}-%`]
+  );
+  return `RCP-${date}-${String((row?.count || 0) + 1).padStart(4, '0')}`;
 }
 
-export function getSetting(key, fallback = '') {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+export async function getSetting(key, fallback = '') {
+  const row = await queryOne('SELECT value FROM settings WHERE key = $1', [key]);
   return row?.value ?? fallback;
 }

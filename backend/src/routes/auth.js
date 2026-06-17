@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import db from '../db.js';
+import { query, queryOne } from '../db.js';
 import {
   verifyPassword,
   verifyTotp,
@@ -10,6 +10,7 @@ import {
 } from '../utils/auth.js';
 import { authenticate, clearStaffActivity } from '../middleware/auth.js';
 import { logAudit } from '../middleware/audit.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
@@ -19,27 +20,31 @@ const loginLimiter = rateLimit({
   message: { error: 'Too many login attempts. Try again later.' },
 });
 
-function logLoginAttempt(username, success, ip) {
-  db.prepare(
-    'INSERT INTO login_attempts (username, success, ip_address) VALUES (?, ?, ?)'
-  ).run(username, success ? 1 : 0, ip);
+async function logLoginAttempt(username, success, ip) {
+  await query(
+    'INSERT INTO login_attempts (username, success, ip_address) VALUES ($1, $2, $3)',
+    [username, success, ip]
+  );
 }
 
-router.post('/login', loginLimiter, (req, res) => {
+router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   const { username, password } = req.body;
 
   if (!username?.trim() || !password) {
     return res.status(400).json({ error: 'Username and password are required' });
   }
 
-  const staff = db.prepare('SELECT * FROM staff WHERE username = ? AND is_active = 1').get(username.trim());
+  const staff = await queryOne(
+    'SELECT * FROM staff WHERE username = $1 AND is_active = TRUE',
+    [username.trim()]
+  );
 
   if (!staff || !verifyPassword(password, staff.password_hash)) {
-    logLoginAttempt(username.trim(), false, req.ip);
+    await logLoginAttempt(username.trim(), false, req.ip);
     return res.status(401).json({ error: 'Invalid username or password' });
   }
 
-  logLoginAttempt(username.trim(), true, req.ip);
+  await logLoginAttempt(username.trim(), true, req.ip);
   const pendingToken = createPendingToken(staff.id);
 
   res.json({
@@ -47,9 +52,9 @@ router.post('/login', loginLimiter, (req, res) => {
     pendingToken,
     staff: { id: staff.id, name: staff.name, role: staff.role, username: staff.username },
   });
-});
+}));
 
-router.post('/verify-2fa', loginLimiter, (req, res) => {
+router.post('/verify-2fa', loginLimiter, asyncHandler(async (req, res) => {
   const { pendingToken, otp } = req.body;
 
   if (!pendingToken || !otp?.trim()) {
@@ -58,14 +63,17 @@ router.post('/verify-2fa', loginLimiter, (req, res) => {
 
   try {
     const { staffId } = verifyPendingToken(pendingToken);
-    const staff = db.prepare('SELECT * FROM staff WHERE id = ? AND is_active = 1').get(staffId);
+    const staff = await queryOne(
+      'SELECT * FROM staff WHERE id = $1 AND is_active = TRUE',
+      [staffId]
+    );
 
     if (!staff) {
       return res.status(401).json({ error: 'Invalid session' });
     }
 
     if (!verifyTotp(staff.totp_secret, otp.trim())) {
-      logLoginAttempt(staff.username, false, req.ip);
+      await logLoginAttempt(staff.username, false, req.ip);
       return res.status(401).json({ error: 'Invalid OTP code' });
     }
 
@@ -84,7 +92,7 @@ router.post('/verify-2fa', loginLimiter, (req, res) => {
   } catch {
     return res.status(401).json({ error: 'Invalid or expired verification session' });
   }
-});
+}));
 
 router.get('/me', authenticate, (req, res) => {
   res.json({

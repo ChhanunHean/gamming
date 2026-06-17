@@ -1,9 +1,10 @@
-import db from '../db.js';
+import { query } from '../db.js';
 
 export function logAudit(staffId, action, details = null, ipAddress = null) {
-  db.prepare(
-    'INSERT INTO audit_logs (staff_id, action, details, ip_address) VALUES (?, ?, ?, ?)'
-  ).run(staffId, action, details ? JSON.stringify(details) : null, ipAddress);
+  query(
+    'INSERT INTO audit_logs (staff_id, action, details, ip_address) VALUES ($1, $2, $3, $4)',
+    [staffId, action, details ? JSON.stringify(details) : null, ipAddress]
+  ).catch(console.error);
 }
 
 export function auditMiddleware(action, getDetails) {

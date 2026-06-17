@@ -1,75 +1,82 @@
 import { Router } from 'express';
-import db from '../db.js';
+import { queryOne, queryAll } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
-router.get('/stats', authenticate, (_req, res) => {
-  const activeCustomers = db
-    .prepare("SELECT COUNT(*) as count FROM sessions WHERE status = 'active'")
-    .get().count;
+router.get('/stats', authenticate, asyncHandler(async (_req, res) => {
+  const activeCustomers = (await queryOne(
+    "SELECT COUNT(*)::int AS count FROM sessions WHERE status = 'active'"
+  )).count;
 
-  const customersToday = db
-    .prepare("SELECT COUNT(*) as count FROM sessions WHERE date(check_in_time) = date('now')")
-    .get().count;
+  const customersToday = (await queryOne(
+    'SELECT COUNT(*)::int AS count FROM sessions WHERE check_in_time::date = CURRENT_DATE'
+  )).count;
 
-  const totalVisits = db.prepare('SELECT COUNT(*) as count FROM sessions').get().count;
+  const totalVisits = (await queryOne('SELECT COUNT(*)::int AS count FROM sessions')).count;
 
-  const revenueToday = db
-    .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE date(payment_date) = date('now')")
-    .get().total;
+  const revenueToday = parseFloat(
+    (await queryOne(
+      'SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE payment_date::date = CURRENT_DATE'
+    )).total
+  );
 
-  const revenueWeek = db
-    .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE date(payment_date) >= date('now', '-7 days')")
-    .get().total;
+  const revenueWeek = parseFloat(
+    (await queryOne(
+      "SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE payment_date::date >= CURRENT_DATE - INTERVAL '7 days'"
+    )).total
+  );
 
-  const revenueMonth = db
-    .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE date(payment_date) >= date('now', 'start of month')")
-    .get().total;
+  const revenueMonth = parseFloat(
+    (await queryOne(
+      "SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE payment_date >= date_trunc('month', CURRENT_DATE)"
+    )).total
+  );
 
-  const stationStats = db.prepare(`
+  const stationStats = await queryOne(`
     SELECT
-      COUNT(*) as total,
-      SUM(CASE WHEN status = 'occupied' THEN 1 ELSE 0 END) as occupied,
-      SUM(CASE WHEN status = 'available' THEN 1 ELSE 0 END) as available,
-      SUM(CASE WHEN status = 'maintenance' THEN 1 ELSE 0 END) as maintenance
+      COUNT(*)::int AS total,
+      SUM(CASE WHEN status = 'occupied' THEN 1 ELSE 0 END)::int AS occupied,
+      SUM(CASE WHEN status = 'available' THEN 1 ELSE 0 END)::int AS available,
+      SUM(CASE WHEN status = 'maintenance' THEN 1 ELSE 0 END)::int AS maintenance
     FROM stations
-  `).get();
+  `);
 
   const occupancyRate = stationStats.total
     ? Math.round((stationStats.occupied / stationStats.total) * 100)
     : 0;
 
-  const topStations = db.prepare(`
-    SELECT st.name, COUNT(s.id) as usage_count
+  const topStations = await queryAll(`
+    SELECT st.name, COUNT(s.id)::int AS usage_count
     FROM stations st
     LEFT JOIN sessions s ON s.station_id = st.id
-    GROUP BY st.id
+    GROUP BY st.id, st.name
     ORDER BY usage_count DESC
     LIMIT 5
-  `).all();
+  `);
 
-  const revenueByMethod = db.prepare(`
-    SELECT payment_method, COALESCE(SUM(amount), 0) as total, COUNT(*) as count
+  const revenueByMethod = await queryAll(`
+    SELECT payment_method, COALESCE(SUM(amount), 0)::float AS total, COUNT(*)::int AS count
     FROM payments
-    WHERE date(payment_date) >= date('now', 'start of month')
+    WHERE payment_date >= date_trunc('month', CURRENT_DATE)
     GROUP BY payment_method
-  `).all();
+  `);
 
-  const peakHours = db.prepare(`
-    SELECT strftime('%H', check_in_time) as hour, COUNT(*) as visits
+  const peakHours = await queryAll(`
+    SELECT TO_CHAR(check_in_time, 'HH24') AS hour, COUNT(*)::int AS visits
     FROM sessions
-    GROUP BY hour
+    GROUP BY 1
     ORDER BY visits DESC
     LIMIT 5
-  `).all();
+  `);
 
-  const pendingPayments = db.prepare(`
-    SELECT COUNT(*) as count
+  const pendingPayments = (await queryOne(`
+    SELECT COUNT(*)::int AS count
     FROM sessions s
     LEFT JOIN payments p ON p.session_id = s.id
     WHERE s.status = 'completed' AND p.id IS NULL
-  `).get().count;
+  `)).count;
 
   res.json({
     customers: {
@@ -94,25 +101,24 @@ router.get('/stats', authenticate, (_req, res) => {
       peakHours,
     },
   });
-});
+}));
 
-router.get('/staff-activity', authenticate, requireRole('manager'), (_req, res) => {
-  const activity = db.prepare(`
+router.get('/staff-activity', authenticate, requireRole('manager'), asyncHandler(async (_req, res) => {
+  const activity = await queryAll(`
     SELECT
       sf.name,
       sf.role,
-      COUNT(DISTINCT s.id) as sessions_handled,
-      COUNT(DISTINCT p.id) as payments_recorded,
-      MAX(a.created_at) as last_activity
+      COUNT(DISTINCT s.id)::int AS sessions_handled,
+      COUNT(DISTINCT p.id)::int AS payments_recorded,
+      MAX(a.created_at) AS last_activity
     FROM staff sf
     LEFT JOIN sessions s ON s.check_in_staff_id = sf.id OR s.check_out_staff_id = sf.id
     LEFT JOIN payments p ON p.staff_id = sf.id
     LEFT JOIN audit_logs a ON a.staff_id = sf.id
-    GROUP BY sf.id
+    GROUP BY sf.id, sf.name, sf.role
     ORDER BY sessions_handled DESC
-  `).all();
-
+  `);
   res.json(activity);
-});
+}));
 
 export default router;

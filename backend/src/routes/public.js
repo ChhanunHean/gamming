@@ -1,16 +1,17 @@
 import { Router } from 'express';
-import db from '../db.js';
+import { queryAll } from '../db.js';
 import { getSetting } from '../utils/pricing.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
-router.get('/info', (_req, res) => {
+router.get('/info', asyncHandler(async (_req, res) => {
   res.json({
-    name: getSetting('center_name', 'Nexus Gaming Center'),
-    address: getSetting('center_address'),
-    phone: getSetting('center_phone'),
-    email: getSetting('center_email'),
-    hours: getSetting('center_hours', 'Open 24/7'),
+    name: await getSetting('center_name', 'Nexus Gaming Center'),
+    address: await getSetting('center_address'),
+    phone: await getSetting('center_phone'),
+    email: await getSetting('center_email'),
+    hours: await getSetting('center_hours', 'Open 24/7'),
     about: 'Nexus Gaming Center is a premium 24/7 gaming destination featuring high-end PCs, console zones, and a vibrant community for gamers of all levels.',
     features: [
       'High-performance gaming PCs',
@@ -27,10 +28,10 @@ router.get('/info', (_req, res) => {
       { title: 'Lounge Area', description: 'Relax between sessions with friends' },
     ],
   });
-});
+}));
 
-router.get('/settings', (_req, res) => {
-  const settings = db.prepare('SELECT key, value FROM settings').all();
+router.get('/settings', asyncHandler(async (_req, res) => {
+  const settings = await queryAll('SELECT key, value FROM settings');
   const publicSettings = {};
   for (const row of settings) {
     if (['center_name', 'center_address', 'center_phone', 'center_email', 'center_hours'].includes(row.key)) {
@@ -38,6 +39,6 @@ router.get('/settings', (_req, res) => {
     }
   }
   res.json(publicSettings);
-});
+}));
 
 export default router;

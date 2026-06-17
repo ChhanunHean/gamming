@@ -1,16 +1,16 @@
-import db from '../db.js';
+import { queryOne } from '../db.js';
 import { verifyAccessToken } from '../utils/auth.js';
 
 const activityMap = new Map();
 const TIMEOUT_KEY = 'inactivity_timeout_minutes';
 
-function getTimeoutMs() {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(TIMEOUT_KEY);
+async function getTimeoutMs() {
+  const row = await queryOne('SELECT value FROM settings WHERE key = $1', [TIMEOUT_KEY]);
   const minutes = parseInt(row?.value || '30', 10);
   return minutes * 60 * 1000;
 }
 
-export function authenticate(req, res, next) {
+export async function authenticate(req, res, next) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Authentication required' });
@@ -19,7 +19,10 @@ export function authenticate(req, res, next) {
   try {
     const token = header.slice(7);
     const payload = verifyAccessToken(token);
-    const staff = db.prepare('SELECT * FROM staff WHERE id = ? AND is_active = 1').get(payload.staffId);
+    const staff = await queryOne(
+      'SELECT * FROM staff WHERE id = $1 AND is_active = TRUE',
+      [payload.staffId]
+    );
 
     if (!staff) {
       return res.status(401).json({ error: 'Invalid session' });
@@ -28,7 +31,7 @@ export function authenticate(req, res, next) {
     const lastActivity = activityMap.get(staff.id) || Date.now();
     const inactiveFor = Date.now() - lastActivity;
 
-    if (inactiveFor > getTimeoutMs()) {
+    if (inactiveFor > (await getTimeoutMs())) {
       activityMap.delete(staff.id);
       return res.status(401).json({ error: 'Session expired due to inactivity' });
     }
